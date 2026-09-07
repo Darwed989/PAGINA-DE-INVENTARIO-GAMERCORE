@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GamerCore // Control de Inventario</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+    
+    <!-- Librería externa para exportar a Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- MENÚ LATERAL -->
+    <aside id="menu-lateral" class="menu-lateral">
+        <div class="menu-logo">
+            <div class="menu-logo-icon">🖥️</div>
+            <div>
+                <strong>GAMERSTOCK</strong>
+                <span>CONTROL CENTER</span>
+            </div>
+        </div>
+
+        <nav class="menu-nav">
+            <button type="button" class="menu-item activo" data-seccion="inicio">
+                <span class="menu-icon">🏠</span>
+                <span>Inicio</span>
+            </button>
+
+            <button type="button" class="menu-item" data-seccion="inventario">
+                <span class="menu-icon">📦</span>
+                <span>Inventario</span>
+            </button>
+
+            <button type="button" class="menu-item" data-seccion="ventas">
+                <span class="menu-icon">🛒</span>
+                <span>Ventas</span>
+            </button>
+
+            <button type="button" class="menu-item" data-seccion="historial">
+                <span class="menu-icon">📊</span>
+                <span>Historial</span>
+            </button>
+
+            <div class="menu-separador"></div>
+
+            <div class="menu-categorias panel-categorias">
+                <div class="menu-categorias-titulo"><span class="icono-panel">📋</span>Categorías</div>
+                <div id="filtros-secciones" class="contenedor-filtros">
+                </div>
+            </div>
+
+            <div class="menu-separador"></div>
+
+            <button type="button" class="menu-item menu-accion" data-accion="backup">
+                <span class="menu-icon">🔐</span>
+                <span>Copias de seguridad</span>
+            </button>
+
+            <button type="button" class="menu-item menu-accion" data-accion="admin">
+                <span class="menu-icon">👑</span>
+                <span>Administrador</span>
+            </button>
+
+            <button type="button" id="btn-restablecer-clave" class="menu-item menu-accion">
+                <span class="menu-icon">🔓</span>
+                <span>Restablecer Contraseña</span>
+            </button>
+        </nav>
+
+        <div class="menu-footer">
+            <span class="menu-status-dot"></span>
+            <span>Sistema operativo</span>
+        </div>
+    </aside>
+
+    <button id="btn-menu-mobile" class="btn-menu-mobile" type="button" aria-label="Abrir menú">
+        ☰
+    </button>
+
+    <div id="menu-overlay" class="menu-overlay"></div>
+
+
+    <div class="container app-contenido">
+        <header class="encabezado-principal" id="seccion-inicio">
+            <div class="contenedor-marca">
+                <div class="marca-identidad">
+                    <img src="logo-gamercore.jpg" alt="Logo GamerCore" class="logo-expotecnologia" onerror="this.style.display='none'; this.nextElementSibling.querySelector('h1').style.marginLeft='0';">
+                    <div class="texto-marca">
+                        <span class="marca-eyebrow">Sistema de Gestión</span>
+                        <h1>GAMERCORE</h1>
+                        <p>Control de Inventario & Hardware</p>
+                    </div>
+                </div>
+                <div class="panel-rol" id="panel-rol">
+                    <span id="badge-rol" class="badge-rol rol-empleado">🙋 Empleado</span>
+                    <div class="fila-botones-rol">
+                        <button type="button" id="btn-cambiar-rol" class="btn-neon btn-small btn-rol">🔑 Iniciar como Admin</button>
+                        <button type="button" id="btn-abrir-cambiar-clave" class="btn-neon btn-small btn-rol" style="display:none;">🔧 Cambiar Contraseña</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            
+            <div class="paneles-laterales">
+
+                <section class="panel-formulario">
+                    <h2 id="titulo-formulario"><span class="icono-panel">➕</span>Ingresar Item</h2>
+                    <form id="form-producto">
+                        <input type="hidden" id="edit-id" value="">
+
+                        <div class="grupo-input">
+                            <label for="nombre">Nombre del Producto</label>
+                            <input type="text" id="nombre" placeholder="Ej. Ryzen 5 5600X" required>
+                        </div>
+                        
+                        <div class="grupo-input">
+                            <label for="categoria">Categoría / Sección</label>
+                            <select id="categoria" required>
+                            </select>
+                        </div>
+
+                        <div class="fila-inputs">
+                            <div class="grupo-input">
+                                <label for="precio">Precio ($)</label>
+                                <input type="number" id="precio" placeholder="0.00" min="0" step="any" required>
+                            </div>
+                            <div class="grupo-input">
+                                <label for="stock">Stock</label>
+                                <input type="number" id="stock" placeholder="0" min="0" required>
+                            </div>
+                        </div>
+
+                        <div class="grupo-input">
+                            <label for="imagen-producto">🖼️ Imagen del Producto</label>
+                            <input type="file" id="imagen-producto" accept="image/*">
+                            <div id="preview-imagen-form" class="preview-imagen" style="display:none;"></div>
+                        </div>
+
+                        <button type="submit" id="btn-submit-form" class="btn-neon">Registrar Componente</button>
+                        <button type="button" id="btn-cancelar-edicion" class="btn-neon btn-cancelar" style="display: none;">Cancelar Edición</button>
+                    </form>
+                </section>
+
+                <section class="panel-formulario nueva-cat-panel">
+                    <h2><span class="icono-panel">🏷️</span>Crear Nueva Sección</h2>
+                    <form id="form-categoria">
+                        <div class="grupo-input">
+                            <input type="text" id="nueva-categoria-nombre" placeholder="Ej. Mandos, Refrigeración..." required>
+                        </div>
+                        <button type="submit" class="btn-neon btn-small">Añadir Categoría</button>
+                    </form>
+                </section>
+
+                <section class="panel-formulario panel-backup" id="seccion-backup">
+                    <h2><span class="icono-panel">🔐</span>Copia de Seguridad</h2>
+                    <p class="panel-backup-desc">Guarda un respaldo liviano o restaura tus datos.</p>
+                    <div class="fila-inputs">
+                        <button type="button" id="btn-exportar" class="btn-neon btn-small btn-backup-action">💾 Exportar JSON</button>
+                        
+                        <label for="importar-archivo" class="btn-neon btn-small btn-backup-action" style="text-align: center; cursor: pointer; margin: 0;">
+                            📂 Importar JSON
+                        </label>
+                        <input type="file" id="importar-archivo" accept=".json" style="display: none;">
+                    </div>
+                    <!-- BOTÓN DE REPARACIÓN AÑADIDO AQUÍ -->
+                    <div class="fila-inputs" style="margin-top: 10px;">
+                        <button type="button" id="btn-reparar-datos" class="btn-neon btn-small btn-backup-action btn-reparar">🧹 Reparar Errores (NaN)</button>
+                    </div>
+                </section>
+
+                <section class="panel-formulario panel-acceso-historial">
+                    <h2><span class="icono-panel">📊</span>Historial de Ventas</h2>
+                    <p class="panel-backup-desc">Consulta todas las ventas y finanzas registradas.</p>
+                    <button type="button" id="btn-abrir-historial" class="btn-neon btn-small btn-excel" style="width:100%;">📊 Historial Completo</button>
+                </section>
+            </div>
+
+            <section class="panel-inventario" id="seccion-inventario">
+                <div class="encabezado-inventario">
+                    <h2><span class="icono-panel">🖥️</span>Catálogo de Hardware Organizado</h2>
+                </div>
+
+                <div class="fila-buscador-accion">
+                    <div class="grupo-buscador">
+                        <input type="text" id="buscador-productos" placeholder="🔍 Buscar por hardware (Ej. Ryzen, Asus, Teclado)...">
+                    </div>
+                    <button type="button" id="btn-exportar-inventario-excel" class="btn-neon btn-small btn-excel">🟢 Exportar Inventario Excel</button>
+                </div>
+
+                <div id="contenedor-cards" class="cuadricula-cards">
+                    <p class="txt-vacio">No hay hardware registrado aún.</p>
+                </div>
+
+                <div id="paginacion-productos" class="contenedor-paginacion"></div>
+            </section>
+        </main>
+
+        <footer class="pie-pagina">
+            <div class="pie-pagina-contenido">
+                <span class="pie-pagina-marca">🖥️ GamerCore <span class="pie-pagina-punto">•</span> GamerStock</span>
+                <span class="pie-pagina-texto">Sistema de Gestión de Inventario &amp; Punto de Venta</span>
+                <span class="pie-pagina-texto">© <span id="pie-pagina-anio"></span> Todos los derechos reservados.</span>
+            </div>
+        </footer>
+
+    </div>
+
+    <!-- MODAL: HISTORIAL COMPLETO DE VENTAS Y FINANZAS -->
+    <div id="modal-historial" class="modal-overlay">
+        <div class="modal-content modal-historial-content" style="position: relative;">
+
+            <span class="btn-cerrar-x" id="btn-cerrar-historial-x">&times;</span>
+
+            <section class="panel-formulario panel-historial-salidas" id="seccion-historial" style="border:none; padding:0; margin:0; box-shadow:none; background:transparent;">
+                <div class="encabezado-historial">
+                    <h2><span class="icono-panel">📊</span>Historial Completo de Ventas y Finanzas</h2>
+                    <div class="botones-historial">
+                        <button type="button" id="btn-descargar-excel" class="btn-neon btn-small btn-excel">🟢 Descargar Historial Excel</button>
+                        <button type="button" id="btn-limpiar-historial" class="btn-neon btn-small btn-limpiar-h">🗑️ Limpiar Historial</button>
+                    </div>
+                </div>
+
+                <div class="tabla-responsiva">
+                    <table class="tabla-historial">
+                        <thead>
+                            <tr>
+                                <th>Fecha y Hora</th>
+                                <th>N° Factura</th>
+                                <th>Hardware</th>
+                                <th>Categoría</th>
+                                <th>Precio Original</th>
+                                <th>Descuento</th>
+                                <th>Precio Final Recaudado</th>
+                                <th>Forma de Pago</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabla-cuerpo-historial">
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- MODAL: CONTRASEÑA DE ADMINISTRADOR -->
+    <div id="modal-password" class="modal-overlay">
+        <div class="modal-content" style="position: relative; max-width: 380px; border: 2px solid #ff6b00; box-shadow: 0 0 45px rgba(255, 107, 0, 0.3); border-radius: 20px; padding: 35px; background:#0a0b12;">
+
+            <span class="btn-cerrar-x" id="btn-cerrar-password-x">&times;</span>
+
+            <h2>🔒 Acceso Restringido</h2>
+            <p style="color:#94a3b8; font-size:0.9rem; margin-bottom:18px; margin-top:-10px;">Esta acción requiere permisos de Administrador.</p>
+
+            <form id="form-password">
+                <div class="grupo-input">
+                    <label for="input-password-admin">Contraseña</label>
+                    <input type="password" id="input-password-admin" placeholder="••••••••" required autocomplete="off">
+                </div>
+                <p id="msg-error-password" style="display:none; color:#ff4d4d; font-size:0.85rem; margin-top:8px;">❌ Contraseña incorrecta, intenta de nuevo.</p>
+
+                <div class="fila-inputs" style="margin-top: 22px;">
+                    <button type="button" id="btn-cancelar-password" class="btn-neon btn-cancelar" style="margin:0;">Cancelar</button>
+                    <button type="submit" class="btn-neon" style="border-color:#ff6b00; color:#ff6b00; margin:0;">Desbloquear</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: CAMBIAR CONTRASEÑA DE ADMINISTRADOR -->
+    <div id="modal-cambiar-clave" class="modal-overlay">
+        <div class="modal-content" style="position: relative; max-width: 380px; border: 2px solid #ffd700; box-shadow: 0 0 45px rgba(255, 215, 0, 0.3); border-radius: 20px; padding: 35px; background:#0a0b12;">
+
+            <span class="btn-cerrar-x" id="btn-cerrar-cambiar-clave-x">&times;</span>
+
+            <h2>🔧 Cambiar Contraseña</h2>
+            <p style="color:#94a3b8; font-size:0.9rem; margin-bottom:18px; margin-top:-10px;">Define la nueva contraseña de Administrador.</p>
+
+            <form id="form-cambiar-clave">
+                <div class="grupo-input">
+                    <label for="input-clave-actual">Contraseña Actual</label>
+                    <input type="password" id="input-clave-actual" placeholder="••••••••" required autocomplete="off">
+                </div>
+                <div class="grupo-input" style="margin-top:12px;">
+                    <label for="input-clave-nueva">Contraseña Nueva</label>
+                    <input type="password" id="input-clave-nueva" placeholder="••••••••" required autocomplete="off" minlength="4">
+                </div>
+                <div class="grupo-input" style="margin-top:12px;">
+                    <label for="input-clave-nueva-confirmar">Confirmar Contraseña Nueva</label>
+                    <input type="password" id="input-clave-nueva-confirmar" placeholder="••••••••" required autocomplete="off" minlength="4">
+                </div>
+                <p id="msg-error-cambiar-clave" style="display:none; color:#ff4d4d; font-size:0.85rem; margin-top:8px;"></p>
+                <p id="msg-exito-cambiar-clave" style="display:none; color:#00e676; font-size:0.85rem; margin-top:8px;">✅ Contraseña actualizada con éxito.</p>
+
+                <div class="fila-inputs" style="margin-top: 22px;">
+                    <button type="button" id="btn-cancelar-cambiar-clave" class="btn-neon btn-cancelar" style="margin:0;">Cancelar</button>
+                    <button type="submit" class="btn-neon" style="border-color:#ffd700; color:#ffd700; margin:0;">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: RESTABLECER CONTRASEÑA (sin pedir la actual) -->
+    <div id="modal-restablecer-clave" class="modal-overlay">
+        <div class="modal-content" style="position: relative; max-width: 380px; border: 2px solid #ffd700; box-shadow: 0 0 45px rgba(255, 215, 0, 0.3); border-radius: 20px; padding: 35px; background:#0a0b12;">
+
+            <span class="btn-cerrar-x" id="btn-cerrar-restablecer-clave-x">&times;</span>
+
+            <h2>🔓 Restablecer Contraseña</h2>
+            <p style="color:#94a3b8; font-size:0.9rem; margin-bottom:18px; margin-top:-10px;">¿Olvidaste tu contraseña? Define una nueva directamente, sin necesitar la anterior.</p>
+
+            <form id="form-restablecer-clave">
+                <div class="grupo-input">
+                    <label for="input-restablecer-nueva">Contraseña Nueva</label>
+                    <input type="password" id="input-restablecer-nueva" placeholder="••••••••" required autocomplete="off" minlength="4">
+                </div>
+                <div class="grupo-input" style="margin-top:12px;">
+                    <label for="input-restablecer-confirmar">Confirmar Contraseña Nueva</label>
+                    <input type="password" id="input-restablecer-confirmar" placeholder="••••••••" required autocomplete="off" minlength="4">
+                </div>
+                <p id="msg-error-restablecer-clave" style="display:none; color:#ff4d4d; font-size:0.85rem; margin-top:8px;"></p>
+                <p id="msg-exito-restablecer-clave" style="display:none; color:#00e676; font-size:0.85rem; margin-top:8px;">✅ Contraseña restablecida con éxito.</p>
+
+                <div class="fila-inputs" style="margin-top: 22px;">
+                    <button type="button" id="btn-cancelar-restablecer-clave" class="btn-neon btn-cancelar" style="margin:0;">Cancelar</button>
+                    <button type="submit" class="btn-neon" style="border-color:#ffd700; color:#ffd700; margin:0;">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- CARRITO FLOTANTE -->
+    <div id="carrito-flotante" class="carrito-flotante">
+
+        <!-- Botón burbuja -->
+        <button id="btn-toggle-carrito" class="btn-burbuja-carrito">
+            🛒
+            <span id="carrito-badge" class="carrito-badge" style="display:none">0</span>
+        </button>
+
+        <!-- Panel del carrito -->
+        <div id="panel-carrito" class="panel-carrito" style="display:none">
+            <div class="carrito-encabezado">
+                <h3>🛒 Carrito de Venta</h3>
+                <button id="btn-cancelar-venta-carrito" class="btn-cancelar-carrito" title="Cancelar venta">✕ Cancelar</button>
+            </div>
+
+            <div class="carrito-cliente">
+                <label>👤 Datos del Cliente</label>
+                <input type="text" id="carrito-nombre-cliente" placeholder="Nombre (opcional)">
+                <input type="text" id="carrito-cedula-cliente" placeholder="Cédula (opcional)" style="margin-top:6px;">
+                <input type="text" id="carrito-celular-cliente" placeholder="Celular (opcional)" style="margin-top:6px;">
+            </div>
+
+            <div class="carrito-cliente">
+                <label>📝 Descripción de la Venta</label>
+                <textarea id="carrito-descripcion-venta" placeholder="Ej. Garantía 6 meses, entrega a domicilio, observaciones..." rows="2" style="width:100%; resize:vertical; font-family:inherit;"></textarea>
+            </div>
+
+            <div id="carrito-items" class="carrito-items">
+                <p class="carrito-vacio">Agrega productos con "Vender".</p>
+            </div>
+
+            <div class="carrito-resumen">
+                <div class="resumen-linea"><span>Subtotal</span><span id="carrito-subtotal">$0.00</span></div>
+                <div class="resumen-linea descuento"><span>Descuentos</span><span id="carrito-descuentos">-$0.00</span></div>
+                <div class="resumen-linea total"><span>TOTAL</span><span id="carrito-total">$0.00</span></div>
+            </div>
+
+            <div class="carrito-pago">
+                <label for="carrito-metodo-pago">Forma de pago</label>
+                <select id="carrito-metodo-pago">
+                    <option value="Efectivo">💵 Efectivo</option>
+                    <option value="Transferencia / Nequi">📱 Transferencia / Nequi / Bancolombia</option>
+                    <option value="Tarjeta Crédito/Débito">💳 Tarjeta Crédito / Débito</option>
+                    <option value="__otro__">➕ Otro (agregar nuevo)...</option>
+                </select>
+
+                <div id="contenedor-nuevo-metodo" style="display:none; margin-top:8px;">
+                    <input type="text" id="input-nuevo-metodo" placeholder="Ej. Rappi Verdad, Daviplata...">
+                    <button type="button" id="btn-guardar-metodo" class="btn-neon btn-small" style="margin-top:6px;">💾 Guardar Método</button>
+                </div>
+            </div>
+
+            <button id="btn-procesar-factura" class="btn-procesar">✅ Procesar Factura</button>
+        </div>
+    </div>
+
+    <!-- MODAL 2: EDITAR COMPONENTE DE HARDWARE -->
+    <div id="modal-editar" class="modal-overlay">
+        <div class="modal-content modal-factura" style="position: relative; border-color: #ffa500; box-shadow: 0 0 45px rgba(255, 165, 0, 0.3);">
+            
+            <span class="btn-cerrar-x" id="btn-cerrar-editar-x">&times;</span>
+
+            <h2>🛠️ ACTUALIZAR COMPONENTE DE HARDWARE</h2>
+            
+            <form id="form-editar-modal">
+                <input type="hidden" id="modal-edit-id" value="">
+
+                <div class="grupo-input">
+                    <label for="modal-edit-nombre">Nombre del Producto</label>
+                    <input type="text" id="modal-edit-nombre" required>
+                </div>
+                
+                <div class="grupo-input">
+                    <label for="modal-edit-categoria">Categoría / Sección</label>
+                    <select id="modal-edit-categoria" required>
+                    </select>
+                </div>
+
+                <div class="fila-inputs">
+                    <div class="grupo-input">
+                        <label for="modal-edit-precio">Precio ($)</label>
+                        <input type="number" id="modal-edit-precio" min="0" step="any" required>
+                    </div>
+                    <div class="grupo-input">
+                        <label for="modal-edit-stock">Stock</label>
+                        <input type="number" id="modal-edit-stock" min="0" required>
+                    </div>
+                </div>
+
+                <div class="grupo-input">
+                    <label for="modal-edit-imagen">🖼️ Cambiar Imagen</label>
+                    <input type="file" id="modal-edit-imagen" accept="image/*">
+                    <div id="preview-imagen-modal" class="preview-imagen" style="display:none;"></div>
+                </div>
+
+                <div class="fila-inputs" style="margin-top: 25px;">
+                    <button type="button" id="btn-cerrar-modal-editar" class="btn-neon btn-cancelar" style="margin: 0;">Cancelar</button>
+                    <button type="submit" class="btn-neon" style="border-color: #ffa500; color: #ffa500; margin: 0;">Guardar Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: CONFIRMAR SI LA VENTA SE REALIZÓ -->
+    <div id="modal-confirmar-venta" class="modal-overlay">
+        <div class="modal-content modal-factura" style="max-width:400px; text-align:center;">
+            <h2>¿Se vendió?</h2>
+            <p style="color:#94a3b8; font-size:0.95rem; margin-top:-10px; margin-bottom:8px;">Confirma si esta venta se realizó, para saber si se debe descontar el stock.</p>
+            <div class="fila-inputs" style="margin-top: 22px;">
+                <button type="button" id="btn-confirmar-no-vendido" class="btn-neon btn-cancelar" style="margin:0;">No</button>
+                <button type="button" id="btn-confirmar-si-vendido" class="btn-neon" style="margin:0;">Sí</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: RECIBO DE VENTA (vista previa antes de imprimir) -->
+    <div id="modal-recibo-venta" class="modal-overlay">
+        <div class="modal-content modal-recibo-venta" style="max-width:680px; background:#fff;">
+            <span class="btn-cerrar-x" id="btn-cerrar-recibo-x" style="color:#000;">&times;</span>
+            <div id="contenedor-recibo-venta"></div>
+            <div class="fila-inputs" style="margin-top: 22px;">
+                <button type="button" id="btn-cerrar-recibo-venta" class="btn-neon btn-cancelar" style="margin:0;">Cerrar</button>
+                <button type="button" id="btn-imprimir-recibo-venta" class="btn-neon" style="margin:0;">🖨️ Imprimir</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
