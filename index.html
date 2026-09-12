@@ -9,9 +9,26 @@
     <!-- Librería externa para exportar a Excel -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     
+    <!-- Conexión a la base de datos en la nube (Supabase) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
+    <!-- PANTALLA DE ACCESO: pide contraseña antes de mostrar el sistema -->
+    <div id="pantalla-login-acceso" class="pantalla-login-acceso">
+        <div class="login-caja">
+            <img src="logo-gamercore.jpg" alt="GamerCore" class="login-logo" onerror="this.style.display='none'">
+            <h1>GAMERCORE</h1>
+            <p>Ingresa la contraseña para acceder al sistema</p>
+            <form id="form-login-acceso" autocomplete="off">
+                <input type="password" id="input-login-acceso" placeholder="••••••••" required autocomplete="off">
+                <p id="msg-error-login-acceso" style="display:none;">❌ Contraseña incorrecta, intenta de nuevo.</p>
+                <button type="submit" class="btn-neon">🔓 Entrar</button>
+            </form>
+        </div>
+    </div>
 
     <!-- MENÚ LATERAL -->
     <aside id="menu-lateral" class="menu-lateral">
@@ -44,6 +61,11 @@
                 <span>Historial</span>
             </button>
 
+            <button type="button" class="menu-item" data-seccion="clientes">
+                <span class="menu-icon">👥</span>
+                <span>Clientes</span>
+            </button>
+
             <div class="menu-separador"></div>
 
             <div class="menu-categorias panel-categorias">
@@ -68,6 +90,13 @@
                 <span class="menu-icon">🔓</span>
                 <span>Restablecer Contraseña</span>
             </button>
+
+            <div class="menu-separador"></div>
+
+            <button type="button" id="btn-salir-app" class="menu-item menu-accion menu-item-salir">
+                <span class="menu-icon">🚪</span>
+                <span>Salir</span>
+            </button>
         </nav>
 
         <div class="menu-footer">
@@ -75,6 +104,8 @@
             <span>Sistema operativo</span>
         </div>
     </aside>
+
+    <button id="btn-colapsar-menu" class="btn-colapsar-menu" type="button" aria-label="Ocultar menú" title="Ocultar menú">‹</button>
 
     <button id="btn-menu-mobile" class="btn-menu-mobile" type="button" aria-label="Abrir menú">
         ☰
@@ -98,7 +129,8 @@
                     <span id="badge-rol" class="badge-rol rol-empleado">🙋 Empleado</span>
                     <div class="fila-botones-rol">
                         <button type="button" id="btn-cambiar-rol" class="btn-neon btn-small btn-rol">🔑 Iniciar como Admin</button>
-                        <button type="button" id="btn-abrir-cambiar-clave" class="btn-neon btn-small btn-rol" style="display:none;">🔧 Cambiar Contraseña</button>
+                        <button type="button" id="btn-abrir-cambiar-clave" class="btn-neon btn-small btn-rol" style="display:none;">🔧 Cambiar Contraseña Admin</button>
+                        <button type="button" id="btn-abrir-cambiar-clave-acceso" class="btn-neon btn-small btn-rol" style="display:none;">🔒 Cambiar Contraseña de Acceso</button>
                     </div>
                 </div>
             </div>
@@ -156,28 +188,6 @@
                     </form>
                 </section>
 
-                <section class="panel-formulario panel-backup" id="seccion-backup">
-                    <h2><span class="icono-panel">🔐</span>Copia de Seguridad</h2>
-                    <p class="panel-backup-desc">Guarda un respaldo liviano o restaura tus datos.</p>
-                    <div class="fila-inputs">
-                        <button type="button" id="btn-exportar" class="btn-neon btn-small btn-backup-action">💾 Exportar JSON</button>
-                        
-                        <label for="importar-archivo" class="btn-neon btn-small btn-backup-action" style="text-align: center; cursor: pointer; margin: 0;">
-                            📂 Importar JSON
-                        </label>
-                        <input type="file" id="importar-archivo" accept=".json" style="display: none;">
-                    </div>
-                    <!-- BOTÓN DE REPARACIÓN AÑADIDO AQUÍ -->
-                    <div class="fila-inputs" style="margin-top: 10px;">
-                        <button type="button" id="btn-reparar-datos" class="btn-neon btn-small btn-backup-action btn-reparar">🧹 Reparar Errores (NaN)</button>
-                    </div>
-                </section>
-
-                <section class="panel-formulario panel-acceso-historial">
-                    <h2><span class="icono-panel">📊</span>Historial de Ventas</h2>
-                    <p class="panel-backup-desc">Consulta todas las ventas y finanzas registradas.</p>
-                    <button type="button" id="btn-abrir-historial" class="btn-neon btn-small btn-excel" style="width:100%;">📊 Historial Completo</button>
-                </section>
             </div>
 
             <section class="panel-inventario" id="seccion-inventario">
@@ -247,6 +257,54 @@
         </div>
     </div>
 
+    <!-- MODAL: CLIENTES -->
+    <div id="modal-clientes" class="modal-overlay">
+        <div class="modal-content modal-historial-content" style="position: relative;">
+
+            <span class="btn-cerrar-x" id="btn-cerrar-clientes-x">&times;</span>
+
+            <section class="panel-formulario panel-historial-salidas" style="border:none; padding:0; margin:0; box-shadow:none; background:transparent;">
+                <div class="encabezado-historial">
+                    <h2><span class="icono-panel">👥</span>Clientes Registrados</h2>
+                    <div class="botones-historial">
+                        <input type="text" id="buscador-clientes" placeholder="🔎 Buscar por nombre, cédula o celular..." style="min-width:240px;">
+                    </div>
+                </div>
+
+                <div id="lista-clientes-vacio" class="carrito-vacio" style="display:none; text-align:center; padding:30px 0;">Aún no hay clientes registrados. Se guardan automáticamente al procesar una venta con nombre o cédula.</div>
+
+                <div id="lista-clientes-contenedor" class="lista-clientes-contenedor"></div>
+            </section>
+        </div>
+    </div>
+
+    <!-- MODAL: DETALLE / COMPRAS DE UN CLIENTE -->
+    <div id="modal-detalle-cliente" class="modal-overlay">
+        <div class="modal-content modal-historial-content" style="position: relative;">
+            <span class="btn-cerrar-x" id="btn-cerrar-detalle-cliente-x">&times;</span>
+            <section class="panel-formulario panel-historial-salidas" style="border:none; padding:0; margin:0; box-shadow:none; background:transparent;">
+                <div class="encabezado-historial">
+                    <h2 id="titulo-detalle-cliente"><span class="icono-panel">👤</span>Cliente</h2>
+                </div>
+                <div id="info-detalle-cliente" class="info-detalle-cliente"></div>
+                <div class="tabla-responsiva">
+                    <table class="tabla-historial">
+                        <thead>
+                            <tr>
+                                <th>Fecha y Hora</th>
+                                <th>N° Factura</th>
+                                <th>Producto</th>
+                                <th>Total Pagado</th>
+                                <th>Forma de Pago</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabla-cuerpo-detalle-cliente"></tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </div>
+
     <!-- MODAL: CONTRASEÑA DE ADMINISTRADOR -->
     <div id="modal-password" class="modal-overlay">
         <div class="modal-content" style="position: relative; max-width: 380px; border: 2px solid #ff6b00; box-shadow: 0 0 45px rgba(255, 107, 0, 0.3); border-radius: 20px; padding: 35px; background:#0a0b12;">
@@ -304,6 +362,39 @@
         </div>
     </div>
 
+    <!-- MODAL: CAMBIAR CONTRASEÑA DE ACCESO AL SISTEMA -->
+    <div id="modal-cambiar-clave-acceso" class="modal-overlay">
+        <div class="modal-content" style="position: relative; max-width: 380px; border: 2px solid #ffd700; box-shadow: 0 0 45px rgba(255, 215, 0, 0.3); border-radius: 20px; padding: 35px; background:#0a0b12;">
+
+            <span class="btn-cerrar-x" id="btn-cerrar-cambiar-clave-acceso-x">&times;</span>
+
+            <h2>🔒 Contraseña de Acceso</h2>
+            <p style="color:#94a3b8; font-size:0.9rem; margin-bottom:18px; margin-top:-10px;">Define la contraseña que se pide al entrar al sistema.</p>
+
+            <form id="form-cambiar-clave-acceso">
+                <div class="grupo-input">
+                    <label for="input-clave-acceso-actual">Contraseña Actual</label>
+                    <input type="password" id="input-clave-acceso-actual" placeholder="••••••••" required autocomplete="off">
+                </div>
+                <div class="grupo-input" style="margin-top:12px;">
+                    <label for="input-clave-acceso-nueva">Contraseña Nueva</label>
+                    <input type="password" id="input-clave-acceso-nueva" placeholder="••••••••" required autocomplete="off" minlength="4">
+                </div>
+                <div class="grupo-input" style="margin-top:12px;">
+                    <label for="input-clave-acceso-nueva-confirmar">Confirmar Contraseña Nueva</label>
+                    <input type="password" id="input-clave-acceso-nueva-confirmar" placeholder="••••••••" required autocomplete="off" minlength="4">
+                </div>
+                <p id="msg-error-cambiar-clave-acceso" style="display:none; color:#ff4d4d; font-size:0.85rem; margin-top:8px;"></p>
+                <p id="msg-exito-cambiar-clave-acceso" style="display:none; color:#00e676; font-size:0.85rem; margin-top:8px;">✅ Contraseña de acceso actualizada con éxito.</p>
+
+                <div class="fila-inputs" style="margin-top: 22px;">
+                    <button type="button" id="btn-cancelar-cambiar-clave-acceso" class="btn-neon btn-cancelar" style="margin:0;">Cancelar</button>
+                    <button type="submit" class="btn-neon" style="border-color:#ffd700; color:#ffd700; margin:0;">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- MODAL: RESTABLECER CONTRASEÑA (sin pedir la actual) -->
     <div id="modal-restablecer-clave" class="modal-overlay">
         <div class="modal-content" style="position: relative; max-width: 380px; border: 2px solid #ffd700; box-shadow: 0 0 45px rgba(255, 215, 0, 0.3); border-radius: 20px; padding: 35px; background:#0a0b12;">
@@ -344,49 +435,65 @@
 
         <!-- Panel del carrito -->
         <div id="panel-carrito" class="panel-carrito" style="display:none">
+            <div class="carrito-caja">
             <div class="carrito-encabezado">
                 <h3>🛒 Carrito de Venta</h3>
-                <button id="btn-cancelar-venta-carrito" class="btn-cancelar-carrito" title="Cancelar venta">✕ Cancelar</button>
-            </div>
-
-            <div class="carrito-cliente">
-                <label>👤 Datos del Cliente</label>
-                <input type="text" id="carrito-nombre-cliente" placeholder="Nombre (opcional)">
-                <input type="text" id="carrito-cedula-cliente" placeholder="Cédula (opcional)" style="margin-top:6px;">
-                <input type="text" id="carrito-celular-cliente" placeholder="Celular (opcional)" style="margin-top:6px;">
-            </div>
-
-            <div class="carrito-cliente">
-                <label>📝 Descripción de la Venta</label>
-                <textarea id="carrito-descripcion-venta" placeholder="Ej. Garantía 6 meses, entrega a domicilio, observaciones..." rows="2" style="width:100%; resize:vertical; font-family:inherit;"></textarea>
-            </div>
-
-            <div id="carrito-items" class="carrito-items">
-                <p class="carrito-vacio">Agrega productos con "Vender".</p>
-            </div>
-
-            <div class="carrito-resumen">
-                <div class="resumen-linea"><span>Subtotal</span><span id="carrito-subtotal">$0.00</span></div>
-                <div class="resumen-linea descuento"><span>Descuentos</span><span id="carrito-descuentos">-$0.00</span></div>
-                <div class="resumen-linea total"><span>TOTAL</span><span id="carrito-total">$0.00</span></div>
-            </div>
-
-            <div class="carrito-pago">
-                <label for="carrito-metodo-pago">Forma de pago</label>
-                <select id="carrito-metodo-pago">
-                    <option value="Efectivo">💵 Efectivo</option>
-                    <option value="Transferencia / Nequi">📱 Transferencia / Nequi / Bancolombia</option>
-                    <option value="Tarjeta Crédito/Débito">💳 Tarjeta Crédito / Débito</option>
-                    <option value="__otro__">➕ Otro (agregar nuevo)...</option>
-                </select>
-
-                <div id="contenedor-nuevo-metodo" style="display:none; margin-top:8px;">
-                    <input type="text" id="input-nuevo-metodo" placeholder="Ej. Rappi Verdad, Daviplata...">
-                    <button type="button" id="btn-guardar-metodo" class="btn-neon btn-small" style="margin-top:6px;">💾 Guardar Método</button>
+                <div style="display:flex; gap:8px;">
+                    <button id="btn-seguir-comprando" class="btn-seguir-comprando" title="Cerrar y seguir agregando productos">🛍️ Seguir Comprando</button>
+                    <button id="btn-cancelar-venta-carrito" class="btn-cancelar-carrito" title="Cancelar venta">✕ Cancelar</button>
                 </div>
             </div>
 
-            <button id="btn-procesar-factura" class="btn-procesar">✅ Procesar Factura</button>
+            <div class="carrito-grid">
+                <div class="carrito-col-izq">
+                    <div class="carrito-cliente">
+                        <label>👤 Datos del Cliente</label>
+                        <input type="text" id="carrito-nombre-cliente" placeholder="Nombre (opcional)" list="lista-sugerencias-clientes" autocomplete="off">
+                        <input type="text" id="carrito-cedula-cliente" placeholder="Cédula (opcional)" style="margin-top:6px;" list="lista-sugerencias-cedulas" autocomplete="off">
+                        <input type="text" id="carrito-celular-cliente" placeholder="Celular (opcional)" style="margin-top:6px;">
+                        <datalist id="lista-sugerencias-clientes"></datalist>
+                        <datalist id="lista-sugerencias-cedulas"></datalist>
+                    </div>
+
+                    <div class="carrito-cliente">
+                        <label>📝 Descripción de la Venta</label>
+                        <button type="button" id="btn-abrir-descripcion-venta" class="btn-descripcion-venta">➕ Agregar Descripción de Venta</button>
+                        <textarea id="carrito-descripcion-venta" style="display:none;"></textarea>
+                    </div>
+
+                    <div class="carrito-pago">
+                        <label for="carrito-metodo-pago">Forma de pago</label>
+                        <select id="carrito-metodo-pago">
+                            <option value="Efectivo">💵 Efectivo</option>
+                            <option value="Transferencia / Nequi">📱 Transferencia / Nequi / Bancolombia</option>
+                            <option value="Tarjeta Crédito/Débito">💳 Tarjeta Crédito / Débito</option>
+                            <option value="__otro__">➕ Otro (agregar nuevo)...</option>
+                        </select>
+
+                        <div id="contenedor-nuevo-metodo" style="display:none; margin-top:8px;">
+                            <input type="text" id="input-nuevo-metodo" placeholder="Ej. Rappi Verdad, Daviplata...">
+                            <button type="button" id="btn-guardar-metodo" class="btn-neon btn-small" style="margin-top:6px;">💾 Guardar Método</button>
+                        </div>
+                    </div>
+
+                    <button id="btn-procesar-factura" class="btn-procesar">✅ Procesar Factura</button>
+                </div>
+
+                <div class="carrito-col-der">
+                    <label class="carrito-productos-titulo">🛍️ Productos en esta Venta</label>
+                    <div id="carrito-items" class="carrito-items">
+                        <p class="carrito-vacio">Agrega productos con "Vender".</p>
+                    </div>
+
+                    <div class="carrito-resumen">
+                        <div class="resumen-linea" id="fila-subtotal-carrito"><span>Subtotal</span><span id="carrito-subtotal">$0.00</span></div>
+                        <div class="resumen-linea descuento" id="fila-descuentos-carrito"><span>Descuentos</span><span id="carrito-descuentos">-$0.00</span></div>
+                        <div class="resumen-linea total"><span>TOTAL</span><span id="carrito-total">$0.00</span></div>
+                    </div>
+                </div>
+            </div>
+
+            </div>
         </div>
     </div>
 
@@ -434,6 +541,41 @@
                     <button type="submit" class="btn-neon" style="border-color: #ffa500; color: #ffa500; margin: 0;">Guardar Cambios</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- MODAL: COPIA DE SEGURIDAD -->
+    <div id="modal-backup" class="modal-overlay">
+        <div class="modal-content modal-factura" style="max-width:480px;">
+            <span class="btn-cerrar-x" id="btn-cerrar-backup-x">&times;</span>
+            <h2><span class="icono-panel">🔐</span>Copia de Seguridad</h2>
+            <p class="panel-backup-desc">Guarda un respaldo liviano o restaura tus datos.</p>
+            <div class="fila-inputs">
+                <button type="button" id="btn-exportar" class="btn-neon btn-small btn-backup-action">💾 Exportar JSON</button>
+
+                <label for="importar-archivo" class="btn-neon btn-small btn-backup-action" style="text-align: center; cursor: pointer; margin: 0;">
+                    📂 Importar JSON
+                </label>
+                <input type="file" id="importar-archivo" accept=".json" style="display: none;">
+            </div>
+            <div class="fila-inputs" style="margin-top: 10px;">
+                <button type="button" id="btn-reparar-datos" class="btn-neon btn-small btn-backup-action btn-reparar">🧹 Reparar Errores (NaN)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: DESCRIPCIÓN DE LA VENTA -->
+    <div id="modal-descripcion-venta" class="modal-overlay">
+        <div class="modal-content modal-factura" style="max-width:480px;">
+            <span class="btn-cerrar-x" id="btn-cerrar-descripcion-x">&times;</span>
+            <h2>📝 Descripción de la Venta</h2>
+            <div class="fila-inputs" style="grid-template-columns: 1fr;">
+                <textarea id="input-descripcion-venta-modal" placeholder="Ej. Garantía 6 meses, entrega a domicilio, observaciones..." rows="5" style="width:100%; resize:vertical; font-family:inherit;"></textarea>
+            </div>
+            <div class="fila-inputs" style="margin-top: 22px;">
+                <button type="button" id="btn-cancelar-descripcion-venta" class="btn-neon btn-cancelar" style="margin:0;">Cancelar</button>
+                <button type="button" id="btn-guardar-descripcion-venta" class="btn-neon" style="margin:0;">💾 Guardar</button>
+            </div>
         </div>
     </div>
 
