@@ -3,11 +3,143 @@
 // Imágenes: IndexedDB local — NUNCA viajan en el JSON
 // ==========================================================================
 
+// ==========================================================================
+// CONEXIÓN A SUPABASE (base de datos en la nube)
+// ==========================================================================
+const SUPABASE_URL = 'https://oaoijxrbdoxhjyauzoer.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hb2lqeHJiZG94aGp5YXV6b2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkxNzk4NTQsImV4cCI6MjEwNDc1NTg1NH0.wgpfjp9Gs5l_9p-mGf7VmdHTNc8EK8xLHw6to_vWgX8';
+let supabaseClient = null;
+try {
+    if (window.supabase) supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+} catch (err) { console.warn('No se pudo iniciar Supabase, se seguirá trabajando localmente:', err); }
+
+// --- Funciones de sincronización (todas "best effort": si falla, la app sigue funcionando con localStorage) ---
+async function supabaseReemplazarInventario() {
+    if (!supabaseClient) return;
+    try {
+        await supabaseClient.from('inventario').delete().neq('id', '__ninguno__');
+        if (inventario.length) {
+            const filas = inventario.map(p => ({ id: String(p.id), nombre: p.nombre, categoria: p.categoria || p.category || '', precio: parseFloat(p.precio) || 0, stock: parseInt(p.stock) || 0 }));
+            await supabaseClient.from('inventario').insert(filas);
+        }
+    } catch (err) { console.warn('Supabase (inventario):', err); }
+}
+
+async function supabaseReemplazarCategorias() {
+    if (!supabaseClient) return;
+    try {
+        await supabaseClient.from('categorias').delete().gte('id', 0);
+        if (categorias.length) await supabaseClient.from('categorias').insert(categorias.map(c => ({ nombre: c })));
+    } catch (err) { console.warn('Supabase (categorias):', err); }
+}
+
+async function supabaseReemplazarMetodosPago() {
+    if (!supabaseClient) return;
+    try {
+        await supabaseClient.from('metodos_pago').delete().gte('id', 0);
+        if (metodosPagoPersonalizados.length) await supabaseClient.from('metodos_pago').insert(metodosPagoPersonalizados.map(m => ({ nombre: m })));
+    } catch (err) { console.warn('Supabase (metodos_pago):', err); }
+}
+
+async function supabaseInsertarHistorial(filasNuevas) {
+    if (!supabaseClient || !filasNuevas.length) return;
+    try {
+        await supabaseClient.from('historial_salidas').insert(filasNuevas.map(t => ({
+            fecha_hora: t.fechaHora, factura: t.factura, nombre: t.nombre, categoria: t.categoria,
+            precio_original: t.precioOriginal, descuento_aplicado: t.descuentoAplicado,
+            precio_venta_final: t.precioVentaFinal, forma_pago: t.formaPago, cliente: t.cliente,
+            descripcion: t.descripcion, vendido: t.vendido
+        })));
+    } catch (err) { console.warn('Supabase (historial):', err); }
+}
+
+async function supabaseLimpiarHistorial() {
+    if (!supabaseClient) return;
+    try { await supabaseClient.from('historial_salidas').delete().gte('id', 0); } catch (err) { console.warn('Supabase (limpiar historial):', err); }
+}
+
+async function supabaseGuardarCliente(cliente) {
+    if (!supabaseClient) return;
+    try {
+        await supabaseClient.from('clientes').upsert({
+            id: cliente.id, clave: cliente.clave, nombre: cliente.nombre, cedula: cliente.cedula, celular: cliente.celular,
+            primera_compra: cliente.primeraCompra, ultima_compra: cliente.ultimaCompra,
+            total_compras: cliente.totalCompras, total_gastado: cliente.totalGastado
+        }, { onConflict: 'id' });
+    } catch (err) { console.warn('Supabase (clientes):', err); }
+}
+
+async function supabaseGuardarConfiguracion(clave, valor) {
+    if (!supabaseClient) return;
+    try { await supabaseClient.from('configuracion_app').upsert({ clave, valor }, { onConflict: 'clave' }); } catch (err) { console.warn('Supabase (config):', err); }
+}
+
+// --- Carga inicial desde Supabase: si hay datos en la nube, reemplazan lo que haya local ---
+async function cargarDatosDesdeSupabase() {
+    if (!supabaseClient) return false;
+    try {
+        const [invRes, catRes, metRes, histRes, cliRes, cfgRes] = await Promise.all([
+            supabaseClient.from('inventario').select('*'),
+            supabaseClient.from('categorias').select('*').order('id'),
+            supabaseClient.from('metodos_pago').select('*').order('id'),
+            supabaseClient.from('historial_salidas').select('*').order('id', { ascending: false }),
+            supabaseClient.from('clientes').select('*'),
+            supabaseClient.from('configuracion_app').select('*')
+        ]);
+
+        // Si la base ya tiene datos (proyecto no vacío), los usamos como fuente de verdad
+        if (invRes.data && invRes.data.length) {
+            inventario = invRes.data.map(p => ({ id: p.id, nombre: p.nombre, categoria: p.categoria, category: p.categoria, precio: p.precio, stock: p.stock }));
+        }
+        if (catRes.data && catRes.data.length) categorias = catRes.data.map(c => c.nombre);
+        if (metRes.data && metRes.data.length) metodosPagoPersonalizados = metRes.data.map(m => m.nombre);
+        if (histRes.data && histRes.data.length) {
+            historialSalidas = histRes.data.map(t => ({
+                fechaHora: t.fecha_hora, factura: t.factura, nombre: t.nombre, categoria: t.categoria,
+                precioOriginal: t.precio_original, descuentoAplicado: t.descuento_aplicado, precioVentaFinal: t.precio_venta_final,
+                formaPago: t.forma_pago, cliente: t.cliente, descripcion: t.descripcion, vendido: t.vendido
+            }));
+        }
+        if (cliRes.data && cliRes.data.length) {
+            clientesGamer = cliRes.data.map(c => ({
+                id: c.id, clave: c.clave, nombre: c.nombre, cedula: c.cedula, celular: c.celular,
+                primeraCompra: c.primera_compra, ultimaCompra: c.ultima_compra, totalCompras: c.total_compras, totalGastado: c.total_gastado
+            }));
+        }
+        if (cfgRes.data && cfgRes.data.length) {
+            cfgRes.data.forEach(row => {
+                if (row.clave === 'admin_password_gamer') localStorage.setItem('admin_password_gamer', row.valor);
+                if (row.clave === 'acceso_password_gamer') localStorage.setItem('acceso_password_gamer', row.valor);
+            });
+        }
+
+        // Guardamos también en localStorage para que sirva de respaldo sin internet
+        localStorage.setItem('inventario_gamer', JSON.stringify(inventario));
+        localStorage.setItem('categorias_gamer', JSON.stringify(categorias));
+        localStorage.setItem('metodos_pago_gamer', JSON.stringify(metodosPagoPersonalizados));
+        localStorage.setItem('historial_salidas_gamer', JSON.stringify(historialSalidas));
+        localStorage.setItem('clientes_gamer', JSON.stringify(clientesGamer));
+
+        // Si la nube está vacía pero hay datos locales (primera vez que se conecta), subimos lo local
+        if (!(invRes.data && invRes.data.length) && inventario.length) supabaseReemplazarInventario();
+        if (!(catRes.data && catRes.data.length) && categorias.length) supabaseReemplazarCategorias();
+        if (!(metRes.data && metRes.data.length) && metodosPagoPersonalizados.length) supabaseReemplazarMetodosPago();
+        if (!(histRes.data && histRes.data.length) && historialSalidas.length) supabaseInsertarHistorial(historialSalidas);
+        if (!(cliRes.data && cliRes.data.length) && clientesGamer.length) clientesGamer.forEach(c => supabaseGuardarCliente(c));
+
+        return true;
+    } catch (err) {
+        console.warn('No se pudo cargar desde Supabase, se sigue trabajando localmente:', err);
+        return false;
+    }
+}
+
 let inventario = JSON.parse(localStorage.getItem('inventario_gamer')) || [];
 let categorias = JSON.parse(localStorage.getItem('categorias_gamer')) || ["Procesadores", "Tarjetas de Video", "Placas Madre", "Periféricos"];
 let historialSalidas = JSON.parse(localStorage.getItem('historial_salidas_gamer')) || [];
 let carritoVentaActual = [];
 let metodosPagoPersonalizados = JSON.parse(localStorage.getItem('metodos_pago_gamer')) || [];
+let clientesGamer = JSON.parse(localStorage.getItem('clientes_gamer')) || [];
 
 // ==========================================================================
 // PAGINACIÓN DEL CATÁLOGO
@@ -144,13 +276,59 @@ function obtenerPasswordAdmin() {
 }
 function guardarPasswordAdmin(nueva) {
     localStorage.setItem('admin_password_gamer', nueva);
+    supabaseGuardarConfiguracion('admin_password_gamer', nueva);
 }
+
+// Contraseña de ACCESO al sistema (se pide al abrir la página).
+// Si nunca la has cambiado, la contraseña por defecto es: gamercore123
+function obtenerPasswordAcceso() {
+    return localStorage.getItem('acceso_password_gamer') || 'gamercore123';
+}
+function guardarPasswordAcceso(nueva) {
+    localStorage.setItem('acceso_password_gamer', nueva);
+    supabaseGuardarConfiguracion('acceso_password_gamer', nueva);
+}
+
+// ==========================================================================
+// PANTALLA DE ACCESO (pide contraseña antes de mostrar el sistema)
+// ==========================================================================
+(function comprobarAccesoApp() {
+    const pantallaLogin = document.getElementById('pantalla-login-acceso');
+    if (!pantallaLogin) return;
+
+    if (sessionStorage.getItem('acceso_concedido_gamer') === 'si') {
+        pantallaLogin.style.display = 'none';
+        return;
+    }
+    pantallaLogin.style.display = 'flex';
+
+    const formLoginAcceso = document.getElementById('form-login-acceso');
+    const inputLoginAcceso = document.getElementById('input-login-acceso');
+    const msgErrorLoginAcceso = document.getElementById('msg-error-login-acceso');
+
+    setTimeout(() => inputLoginAcceso && inputLoginAcceso.focus(), 150);
+
+    if (formLoginAcceso) {
+        formLoginAcceso.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (inputLoginAcceso.value === obtenerPasswordAcceso()) {
+                sessionStorage.setItem('acceso_concedido_gamer', 'si');
+                pantallaLogin.style.display = 'none';
+            } else {
+                if (msgErrorLoginAcceso) msgErrorLoginAcceso.style.display = 'block';
+                inputLoginAcceso.value = '';
+                inputLoginAcceso.focus();
+            }
+        });
+    }
+})();
 
 let rolActual = sessionStorage.getItem('rol_gamer') || 'empleado';
 
 const badgeRol           = document.getElementById('badge-rol');
 const btnCambiarRol      = document.getElementById('btn-cambiar-rol');
 const btnAbrirCambiarClave = document.getElementById('btn-abrir-cambiar-clave');
+const btnAbrirCambiarClaveAcceso = document.getElementById('btn-abrir-cambiar-clave-acceso');
 const modalPassword      = document.getElementById('modal-password');
 const formPassword       = document.getElementById('form-password');
 const inputPasswordAdmin = document.getElementById('input-password-admin');
@@ -179,11 +357,13 @@ function actualizarBadgeRol() {
         badgeRol.className = 'badge-rol rol-admin';
         btnCambiarRol.textContent = '🔒 Cerrar sesión Admin';
         if (btnAbrirCambiarClave) btnAbrirCambiarClave.style.display = 'inline-block';
+        if (btnAbrirCambiarClaveAcceso) btnAbrirCambiarClaveAcceso.style.display = 'inline-block';
     } else {
         badgeRol.textContent = '🙋 Empleado';
         badgeRol.className = 'badge-rol rol-empleado';
         btnCambiarRol.textContent = '🔑 Iniciar como Admin';
         if (btnAbrirCambiarClave) btnAbrirCambiarClave.style.display = 'none';
+        if (btnAbrirCambiarClaveAcceso) btnAbrirCambiarClaveAcceso.style.display = 'none';
     }
 }
 
@@ -235,17 +415,61 @@ if (btnCambiarRol) {
             rolActual = 'empleado';
             sessionStorage.setItem('rol_gamer', rolActual);
             actualizarBadgeRol();
+            actualizarInterfaz(obtenerFiltroActivo()); actualizarStats();
             return;
         }
         abrirModalPassword(() => {
             rolActual = 'administrador';
             sessionStorage.setItem('rol_gamer', rolActual);
             actualizarBadgeRol();
+            actualizarInterfaz(obtenerFiltroActivo()); actualizarStats();
         });
     });
 }
 
 actualizarBadgeRol();
+
+// ==========================================================================
+// SALIR / CIERRE AUTOMÁTICO POR INACTIVIDAD (seguridad)
+// ==========================================================================
+function bloquearAccesoApp() {
+    const pantallaLogin = document.getElementById('pantalla-login-acceso');
+    if (!pantallaLogin || pantallaLogin.style.display === 'flex') return; // ya está bloqueada
+
+    sessionStorage.removeItem('acceso_concedido_gamer');
+    sessionStorage.removeItem('rol_gamer');
+    rolActual = 'empleado';
+    actualizarBadgeRol();
+
+    const inputLoginAcceso = document.getElementById('input-login-acceso');
+    const msgErrorLoginAcceso = document.getElementById('msg-error-login-acceso');
+    if (inputLoginAcceso) inputLoginAcceso.value = '';
+    if (msgErrorLoginAcceso) msgErrorLoginAcceso.style.display = 'none';
+
+    pantallaLogin.style.display = 'flex';
+    setTimeout(() => inputLoginAcceso && inputLoginAcceso.focus(), 150);
+}
+
+const btnSalirApp = document.getElementById('btn-salir-app');
+if (btnSalirApp) {
+    btnSalirApp.addEventListener('click', () => {
+        if (confirm('¿Salir del sistema? Vas a necesitar la contraseña de acceso para volver a entrar.')) {
+            bloquearAccesoApp();
+        }
+    });
+}
+
+// Bloqueo automático tras 10 minutos sin ninguna actividad (mouse, teclado, clics, etc.)
+const TIEMPO_INACTIVIDAD_MS = 10 * 60 * 1000;
+let temporizadorInactividad;
+function reiniciarTemporizadorInactividad() {
+    clearTimeout(temporizadorInactividad);
+    temporizadorInactividad = setTimeout(bloquearAccesoApp, TIEMPO_INACTIVIDAD_MS);
+}
+['mousemove', 'keydown', 'click', 'touchstart', 'scroll', 'wheel'].forEach(evento => {
+    document.addEventListener(evento, reiniciarTemporizadorInactividad, { passive: true });
+});
+reiniciarTemporizadorInactividad();
 
 // ==========================================================================
 // CAMBIAR CONTRASEÑA DE ADMINISTRADOR
@@ -299,6 +523,71 @@ if (formCambiarClave) {
         msgExitoCambiarClave.style.display = 'block';
         formCambiarClave.reset();
         setTimeout(cerrarModalCambiarClave, 1400);
+    });
+}
+
+// ==========================================================================
+// CAMBIAR CONTRASEÑA DE ACCESO AL SISTEMA
+// ==========================================================================
+const modalCambiarClaveAcceso  = document.getElementById('modal-cambiar-clave-acceso');
+const formCambiarClaveAcceso   = document.getElementById('form-cambiar-clave-acceso');
+const inputClaveAccesoActual   = document.getElementById('input-clave-acceso-actual');
+const inputClaveAccesoNueva    = document.getElementById('input-clave-acceso-nueva');
+const inputClaveAccesoNuevaConfirmar = document.getElementById('input-clave-acceso-nueva-confirmar');
+const msgErrorCambiarClaveAcceso = document.getElementById('msg-error-cambiar-clave-acceso');
+const msgExitoCambiarClaveAcceso = document.getElementById('msg-exito-cambiar-clave-acceso');
+const btnCancelarCambiarClaveAcceso = document.getElementById('btn-cancelar-cambiar-clave-acceso');
+const btnCerrarCambiarClaveAccesoX  = document.getElementById('btn-cerrar-cambiar-clave-acceso-x');
+
+function abrirModalCambiarClaveAcceso() {
+    if (!modalCambiarClaveAcceso) return;
+    formCambiarClaveAcceso.reset();
+    msgErrorCambiarClaveAcceso.style.display = 'none';
+    msgExitoCambiarClaveAcceso.style.display = 'none';
+    modalCambiarClaveAcceso.classList.add('active');
+}
+
+function cerrarModalCambiarClaveAcceso() {
+    if (modalCambiarClaveAcceso) modalCambiarClaveAcceso.classList.remove('active');
+}
+
+if (btnAbrirCambiarClaveAcceso) btnAbrirCambiarClaveAcceso.addEventListener('click', abrirModalCambiarClaveAcceso);
+if (btnCancelarCambiarClaveAcceso) btnCancelarCambiarClaveAcceso.addEventListener('click', cerrarModalCambiarClaveAcceso);
+if (btnCerrarCambiarClaveAccesoX) btnCerrarCambiarClaveAccesoX.addEventListener('click', cerrarModalCambiarClaveAcceso);
+if (modalCambiarClaveAcceso) {
+    modalCambiarClaveAcceso.addEventListener('click', (e) => { if (e.target === modalCambiarClaveAcceso) cerrarModalCambiarClaveAcceso(); });
+}
+
+if (formCambiarClaveAcceso) {
+    formCambiarClaveAcceso.addEventListener('submit', function(e) {
+        e.preventDefault();
+        msgErrorCambiarClaveAcceso.style.display = 'none';
+        msgExitoCambiarClaveAcceso.style.display = 'none';
+
+        const actual = inputClaveAccesoActual.value;
+        const nueva = inputClaveAccesoNueva.value;
+        const confirmar = inputClaveAccesoNuevaConfirmar.value;
+
+        if (actual !== obtenerPasswordAcceso()) {
+            msgErrorCambiarClaveAcceso.textContent = '❌ La contraseña actual no es correcta.';
+            msgErrorCambiarClaveAcceso.style.display = 'block';
+            return;
+        }
+        if (nueva.length < 4) {
+            msgErrorCambiarClaveAcceso.textContent = '❌ La nueva contraseña debe tener al menos 4 caracteres.';
+            msgErrorCambiarClaveAcceso.style.display = 'block';
+            return;
+        }
+        if (nueva !== confirmar) {
+            msgErrorCambiarClaveAcceso.textContent = '❌ Las contraseñas nuevas no coinciden.';
+            msgErrorCambiarClaveAcceso.style.display = 'block';
+            return;
+        }
+
+        guardarPasswordAcceso(nueva);
+        msgExitoCambiarClaveAcceso.style.display = 'block';
+        formCambiarClaveAcceso.reset();
+        setTimeout(cerrarModalCambiarClaveAcceso, 1400);
     });
 }
 
@@ -416,6 +705,7 @@ btnGuardarMetodo.addEventListener('click', () => {
     if (!metodosPagoPersonalizados.some(m => m.toLowerCase() === nombreMetodo.toLowerCase())) {
         metodosPagoPersonalizados.push(nombreMetodo);
         localStorage.setItem('metodos_pago_gamer', JSON.stringify(metodosPagoPersonalizados));
+        supabaseReemplazarMetodosPago();
         pintarMetodosPagoPersonalizados();
     }
 
@@ -434,7 +724,53 @@ btnToggleCarrito.addEventListener('click', () => {
 btnCancelarCarrito.addEventListener('click', () => {
     if (carritoVentaActual.length === 0 || confirm("¿Cancelar la venta? El inventario no se modificará.")) {
         carritoVentaActual = []; renderizarCarrito(); panelCarrito.style.display = 'none';
+        document.getElementById('carrito-descripcion-venta').value = "";
+        actualizarBotonDescripcionVenta();
     }
+});
+
+const btnSeguirComprando = document.getElementById('btn-seguir-comprando');
+if (btnSeguirComprando) btnSeguirComprando.addEventListener('click', () => {
+    panelCarrito.style.display = 'none';
+});
+
+// --- Descripción de la venta (modal) ---
+const campoDescripcionVenta = document.getElementById('carrito-descripcion-venta');
+const btnAbrirDescripcionVenta = document.getElementById('btn-abrir-descripcion-venta');
+const modalDescripcionVenta = document.getElementById('modal-descripcion-venta');
+const inputDescripcionModal = document.getElementById('input-descripcion-venta-modal');
+
+function actualizarBotonDescripcionVenta() {
+    const texto = campoDescripcionVenta.value.trim();
+    if (texto) {
+        btnAbrirDescripcionVenta.textContent = '✏️ Editar Descripción de Venta';
+        btnAbrirDescripcionVenta.classList.add('con-texto');
+    } else {
+        btnAbrirDescripcionVenta.textContent = '➕ Agregar Descripción de Venta';
+        btnAbrirDescripcionVenta.classList.remove('con-texto');
+    }
+}
+
+if (btnAbrirDescripcionVenta) btnAbrirDescripcionVenta.addEventListener('click', () => {
+    inputDescripcionModal.value = campoDescripcionVenta.value;
+    modalDescripcionVenta.classList.add('active');
+    inputDescripcionModal.focus();
+});
+
+function cerrarModalDescripcionVenta() {
+    modalDescripcionVenta.classList.remove('active');
+}
+
+const btnCerrarDescripcionX = document.getElementById('btn-cerrar-descripcion-x');
+const btnCancelarDescripcionVenta = document.getElementById('btn-cancelar-descripcion-venta');
+const btnGuardarDescripcionVenta = document.getElementById('btn-guardar-descripcion-venta');
+
+if (btnCerrarDescripcionX) btnCerrarDescripcionX.addEventListener('click', cerrarModalDescripcionVenta);
+if (btnCancelarDescripcionVenta) btnCancelarDescripcionVenta.addEventListener('click', cerrarModalDescripcionVenta);
+if (btnGuardarDescripcionVenta) btnGuardarDescripcionVenta.addEventListener('click', () => {
+    campoDescripcionVenta.value = inputDescripcionModal.value.trim();
+    actualizarBotonDescripcionVenta();
+    cerrarModalDescripcionVenta();
 });
 
 window.agregarAlCarritoVenta = function(id) {
@@ -442,14 +778,16 @@ window.agregarAlCarritoVenta = function(id) {
     if (!prod) return;
     const pStock = parseInt(prod.stock) || 0;
     if (pStock <= 0) { alert(`"${prod.nombre}" está agotado.`); return; }
+    const carritoEstabaVacio = carritoVentaActual.length === 0;
     const existente = carritoVentaActual.find(i => i.id === id);
     if (existente) {
         if (existente.cantidad + 1 > pStock) { alert(`Stock máximo: ${pStock} unidades.`); return; }
         existente.cantidad++;
     } else {
-        carritoVentaActual.push({ id: prod.id, nombre: prod.nombre, categoria: prod.categoria || prod.category, precioOriginal: parseFloat(prod.precio) || 0, cantidad: 1, descuento: 0 });
+        carritoVentaActual.push({ id: prod.id, nombre: prod.nombre, categoria: prod.categoria || prod.category, precioOriginal: parseFloat(prod.precio) || 0, cantidad: 1, descuento: 0, descripcionProducto: '' });
     }
-    renderizarCarrito(); panelCarrito.style.display = 'flex';
+    renderizarCarrito();
+    if (carritoEstabaVacio) panelCarrito.style.display = 'flex';
 };
 
 function renderizarCarrito() {
@@ -473,17 +811,24 @@ function renderizarCarrito() {
         div.className = 'carrito-item';
         div.innerHTML = `
             <div class="ci-top"><span class="ci-nombre">${item.nombre}</span><button class="ci-quitar" onclick="removerDelCarrito(${idx})">✕</button></div>
-            <div class="ci-controles">
-                <div class="ci-campo"><label>Precio $</label><input type="number" value="${item.precioOriginal}" min="0" step="any" onchange="cambiarPrecioCarrito(${idx},this.value)"></div>
+            <div class="ci-controles ${esAdmin() ? '' : 'ci-controles-empleado'}">
+                ${esAdmin() ? `<div class="ci-campo"><label>Precio $</label><input type="number" value="${item.precioOriginal}" min="0" step="any" onchange="cambiarPrecioCarrito(${idx},this.value)"></div>` : ''}
                 <div class="ci-campo"><label>Cant.</label><input type="number" value="${item.cantidad}" min="1" max="${maxStock}" onchange="cambiarCantidadCarrito(${idx},this.value)"></div>
-                <div class="ci-campo"><label>Desc. $</label><input type="number" value="${item.descuento}" min="0" step="any" onchange="cambiarDescuentoCarrito(${idx},this.value)"></div>
-                <div class="ci-campo ci-total-item"><label>Total</label><span>${formatearMoneda(totalItem)}</span></div>
+                ${esAdmin() ? `<div class="ci-campo"><label>Desc. $</label><input type="number" value="${item.descuento}" min="0" step="any" onchange="cambiarDescuentoCarrito(${idx},this.value)"></div>
+                <div class="ci-campo ci-total-item"><label>Total</label><span>${formatearMoneda(totalItem)}</span></div>` : ''}
+            </div>
+            <div class="ci-nota">
+                <input type="text" placeholder="📝 Nota de este producto (ej. color, serial, garantía)..." value="${(item.descripcionProducto || '').replace(/"/g, '&quot;')}" onchange="cambiarDescripcionProductoCarrito(${idx},this.value)">
             </div>`;
         carritoItemsEl.appendChild(div);
     });
     carritoSubtotalEl.textContent = formatearMoneda(subtotal);
     carritoDescEl.textContent = `-${formatearMoneda(totalDesc)}`;
     carritoTotalEl.textContent = formatearMoneda(subtotal - totalDesc);
+    const filaSubtotal = document.getElementById('fila-subtotal-carrito');
+    const filaDescuentos = document.getElementById('fila-descuentos-carrito');
+    if (filaSubtotal) filaSubtotal.style.display = esAdmin() ? '' : 'none';
+    if (filaDescuentos) filaDescuentos.style.display = esAdmin() ? '' : 'none';
 }
 
 window.cambiarPrecioCarrito = function(idx, val) {
@@ -507,6 +852,9 @@ window.cambiarDescuentoCarrito = function(idx, val) {
 };
 window.removerDelCarrito = function(idx) {
     carritoVentaActual.splice(idx, 1); renderizarCarrito();
+};
+window.cambiarDescripcionProductoCarrito = function(idx, val) {
+    carritoVentaActual[idx].descripcionProducto = val.trim();
 };
 
 btnProcesarFactura.addEventListener('click', function() {
@@ -535,11 +883,15 @@ function completarProcesoFactura(seVendio) {
     });
     localStorage.setItem('inventario_gamer', JSON.stringify(inventario));
     localStorage.setItem('historial_salidas_gamer', JSON.stringify(historialSalidas));
+    supabaseReemplazarInventario();
+    supabaseInsertarHistorial(historialSalidas.slice(0, carritoVentaActual.length));
+    guardarOActualizarCliente(nombreCliente, cedulaCliente, celularCliente, fechaHora, totalRecibo, seVendio);
     imprimirReciboTicket(numeroFactura, fechaHora, metodoPago, nombreCliente, cedulaCliente, celularCliente, productosParaRecibo, subtotalRecibo, totalRecibo, descripcionVenta, seVendio);
     document.getElementById('carrito-nombre-cliente').value = "";
     document.getElementById('carrito-cedula-cliente').value = "";
     document.getElementById('carrito-celular-cliente').value = "";
     document.getElementById('carrito-descripcion-venta').value = "";
+    actualizarBotonDescripcionVenta();
     carritoVentaActual = []; renderizarCarrito(); panelCarrito.style.display = 'none';
     actualizarInterfaz(obtenerFiltroActivo()); renderizarTablaHistorial();
     alert(seVendio ? `✅ Factura ${numeroFactura} procesada con éxito.` : `⚠️ Factura ${numeroFactura} registrada sin descontar stock.`);
@@ -681,6 +1033,7 @@ formCategoria.addEventListener('submit', function(e) {
     if (nuevaCat && !categorias.includes(nuevaCat)) {
         categorias.push(nuevaCat);
         localStorage.setItem('categorias_gamer', JSON.stringify(categorias));
+        supabaseReemplazarCategorias();
         actualizarSelectCategorias(); actualizarFiltros(obtenerFiltroActivo()); formCategoria.reset();
         alert(`Sección "${nuevaCat}" agregada. 🎮`);
     }
@@ -699,6 +1052,8 @@ function eliminarCategoriaReal(catAEliminar) {
     categorias = categorias.filter(c => c !== catAEliminar);
     localStorage.setItem('categorias_gamer', JSON.stringify(categorias));
     localStorage.setItem('inventario_gamer', JSON.stringify(inventario));
+    supabaseReemplazarCategorias();
+    supabaseReemplazarInventario();
     const nuevoFiltro = (filtroPrevio === catAEliminar) ? 'todos' : filtroPrevio;
     actualizarSelectCategorias(); actualizarFiltros(nuevoFiltro); actualizarInterfaz(nuevoFiltro);
     alert(`Categoría "${catAEliminar}" removida.`);
@@ -721,6 +1076,7 @@ formProducto.addEventListener('submit', async function(e) {
         inventario = inventario.map(p => p.id === idNum ? { ...p, nombre, categoria, category: categoria, precio, stock } : p);
         if (archivo) { const b64 = await comprimirImagen(archivo); await guardarImagenDB(idNum, b64); }
         localStorage.setItem('inventario_gamer', JSON.stringify(inventario));
+        supabaseReemplazarInventario();
         resetearModoFormulario();
         // Solo actualizamos la tarjeta editada, sin repintar todo el catálogo
         refrescarProductoEnPantalla(idNum, !!archivo);
@@ -731,6 +1087,7 @@ formProducto.addEventListener('submit', async function(e) {
         if (archivo) { const b64 = await comprimirImagen(archivo); await guardarImagenDB(nuevoId, b64); }
     }
     localStorage.setItem('inventario_gamer', JSON.stringify(inventario));
+    supabaseReemplazarInventario();
     formProducto.reset(); previewImagenForm.style.display = 'none';
     actualizarInterfaz(obtenerFiltroActivo());
 });
@@ -781,6 +1138,7 @@ formEditarModal.addEventListener('submit', async function(e) {
     inventario = inventario.map(p => p.id === idEdicion ? { ...p, nombre, categoria, category: categoria, precio, stock } : p);
     if (archivo) { const b64 = await comprimirImagen(archivo); await guardarImagenDB(idEdicion, b64); }
     localStorage.setItem('inventario_gamer', JSON.stringify(inventario));
+    supabaseReemplazarInventario();
     cerrarModalEditarFlotante();
     // Solo actualizamos la tarjeta editada, sin repintar todo el catálogo (no más "salto")
     refrescarProductoEnPantalla(idEdicion, !!archivo);
@@ -804,6 +1162,7 @@ function eliminarProductoReal(id) {
         inventario = inventario.filter(p => p.id !== id);
         eliminarImagenDB(id);
         localStorage.setItem('inventario_gamer', JSON.stringify(inventario));
+        supabaseReemplazarInventario();
         actualizarInterfaz(obtenerFiltroActivo());
     }
 }
@@ -858,8 +1217,8 @@ function actualizarInterfaz(categoriaFiltro = 'todos') {
                 <div class="tarjeta-info">
                     <h3>${prod.nombre}</h3>
                     <p class="txt-cat" title="${catActual}">${(catActual || '').split('>').pop().trim()}</p>
-                    <p class="txt-precio">${formatearMoneda(pPrecio)}</p>
-                    <div class="info-stock"><span class="dot-stock ${stockClass}"></span><span>${pStock} un. (${stockTexto})</span></div>
+                    ${esAdmin() ? `<p class="txt-precio">${formatearMoneda(pPrecio)}</p>` : ''}
+                    ${esAdmin() ? `<div class="info-stock"><span class="dot-stock ${stockClass}"></span><span>${pStock} un. (${stockTexto})</span></div>` : ''}
                 </div>
                 <div class="tarjeta-acciones">
                     <div class="fila-botones-principales">
@@ -951,8 +1310,8 @@ function actualizarStats() {
     const totalDinero = inventario.reduce((acc, p) => acc + ((parseFloat(p.precio)||0) * (parseInt(p.stock)||0)), 0);
     const alertasStock = inventario.filter(p => (parseInt(p.stock)||0) <= 3).length;
     if (totalProductosEl) totalProductosEl.textContent = inventario.length;
-    if (valorTotalEl) valorTotalEl.textContent = formatearMoneda(totalDinero);
-    if (alertasStockEl) alertasStockEl.textContent = alertasStock;
+    if (valorTotalEl) valorTotalEl.textContent = esAdmin() ? formatearMoneda(totalDinero) : '••••••';
+    if (alertasStockEl) alertasStockEl.textContent = esAdmin() ? alertasStock : '••';
 }
 
 // ==========================================================================
@@ -993,9 +1352,12 @@ function refrescarProductoEnPantalla(id, imagenCambio = false) {
     const elTxtCat = card.querySelector('.txt-cat');
     elTxtCat.textContent = (catActual || '').split('>').pop().trim();
     elTxtCat.title = catActual;
-    card.querySelector('.txt-precio').textContent = formatearMoneda(pPrecio);
-    card.querySelector('.dot-stock').className = `dot-stock ${stockClass}`;
-    card.querySelector('.info-stock span:last-child').textContent = `${pStock} un. (${stockTexto})`;
+    const elTxtPrecio = card.querySelector('.txt-precio');
+    if (elTxtPrecio) elTxtPrecio.textContent = formatearMoneda(pPrecio);
+    const elDotStock = card.querySelector('.dot-stock');
+    if (elDotStock) elDotStock.className = `dot-stock ${stockClass}`;
+    const elInfoStock = card.querySelector('.info-stock span:last-child');
+    if (elInfoStock) elInfoStock.textContent = `${pStock} un. (${stockTexto})`;
     const imgEl = card.querySelector('.tarjeta-img');
     if (imgEl) imgEl.alt = prod.nombre;
 
@@ -1079,6 +1441,8 @@ function procesarImportacionJSON(archivo) {
             inventario.forEach(p => { if (p.categoria && p.categoria !== "Sin Categoría" && !categorias.includes(p.categoria)) categorias.push(p.categoria); });
             localStorage.setItem('inventario_gamer', JSON.stringify(inventario));
             localStorage.setItem('categorias_gamer', JSON.stringify(categorias));
+            supabaseReemplazarInventario();
+            supabaseReemplazarCategorias();
             actualizarSelectCategorias(); actualizarFiltros(); actualizarInterfaz('todos');
         } catch { alert("Error: Archivo JSON inválido."); }
     };
@@ -1101,6 +1465,8 @@ if (btnRepararDatos) {
             inventario.forEach(p => { if (p.categoria && p.categoria !== "Sin Categoría" && !categorias.includes(p.categoria)) categorias.push(p.categoria); });
             localStorage.setItem('inventario_gamer', JSON.stringify(inventario));
             localStorage.setItem('categorias_gamer', JSON.stringify(categorias));
+            supabaseReemplazarInventario();
+            supabaseReemplazarCategorias();
             actualizarSelectCategorias(); actualizarFiltros(); actualizarInterfaz('todos');
             alert("¡Datos reparados! ✅ Las imágenes locales están intactas.");
         });
@@ -1199,7 +1565,7 @@ function renderizarTablaHistorial() {
 btnLimpiarHistorial.addEventListener('click', function() {
     ejecutarConPermiso(function() {
         if (confirm("🚨 ¿Purgar el historial de ventas?")) {
-            historialSalidas = []; localStorage.setItem('historial_salidas_gamer', JSON.stringify(historialSalidas)); renderizarTablaHistorial();
+            historialSalidas = []; localStorage.setItem('historial_salidas_gamer', JSON.stringify(historialSalidas)); supabaseLimpiarHistorial(); renderizarTablaHistorial();
         }
     });
 });
@@ -1220,6 +1586,168 @@ btnDescargarExcel.addEventListener('click', function() {
 });
 
 // ==========================================================================
+// CLIENTES
+// ==========================================================================
+function claveCliente(nombre, cedula) {
+    if (cedula && cedula.trim()) return 'ced:' + cedula.trim().toLowerCase();
+    if (nombre && nombre.trim() && nombre.trim().toLowerCase() !== 'cliente general') return 'nom:' + nombre.trim().toLowerCase();
+    return null;
+}
+
+function guardarOActualizarCliente(nombre, cedula, celular, fechaHora, totalVenta, seVendio) {
+    const clave = claveCliente(nombre, cedula);
+    if (!clave) return; // No se guarda "Cliente General" sin datos identificables
+
+    let cliente = clientesGamer.find(c => c.clave === clave);
+    if (!cliente) {
+        cliente = {
+            id: 'cli_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+            clave,
+            nombre: nombre || 'Cliente General',
+            cedula: cedula || '',
+            celular: celular || '',
+            primeraCompra: fechaHora,
+            ultimaCompra: fechaHora,
+            totalCompras: 0,
+            totalGastado: 0
+        };
+        clientesGamer.unshift(cliente);
+    }
+    // Actualiza datos si llegaron más completos
+    if (nombre && nombre.trim().toLowerCase() !== 'cliente general') cliente.nombre = nombre;
+    if (cedula) cliente.cedula = cedula;
+    if (celular) cliente.celular = celular;
+    cliente.ultimaCompra = fechaHora;
+    if (seVendio) {
+        cliente.totalCompras += 1;
+        cliente.totalGastado += (totalVenta || 0);
+    }
+    localStorage.setItem('clientes_gamer', JSON.stringify(clientesGamer));
+    supabaseGuardarCliente(cliente);
+    actualizarSugerenciasClientes();
+}
+
+function actualizarSugerenciasClientes() {
+    const dlNombres = document.getElementById('lista-sugerencias-clientes');
+    const dlCedulas = document.getElementById('lista-sugerencias-cedulas');
+    if (dlNombres) {
+        dlNombres.innerHTML = clientesGamer.map(c => `<option value="${c.nombre.replace(/"/g,'&quot;')}"></option>`).join('');
+    }
+    if (dlCedulas) {
+        dlCedulas.innerHTML = clientesGamer.filter(c => c.cedula).map(c => `<option value="${c.cedula.replace(/"/g,'&quot;')}"></option>`).join('');
+    }
+}
+
+function renderizarListaClientes(filtro = '') {
+    const contenedor = document.getElementById('lista-clientes-contenedor');
+    const vacio = document.getElementById('lista-clientes-vacio');
+    if (!contenedor) return;
+
+    const term = filtro.trim().toLowerCase();
+    const lista = clientesGamer.filter(c => {
+        if (!term) return true;
+        return c.nombre.toLowerCase().includes(term) || (c.cedula || '').toLowerCase().includes(term) || (c.celular || '').toLowerCase().includes(term);
+    }).sort((a, b) => new Date(b.ultimaCompra) - new Date(a.ultimaCompra));
+
+    contenedor.innerHTML = '';
+    if (lista.length === 0) {
+        vacio.style.display = 'block';
+        vacio.textContent = clientesGamer.length === 0
+            ? 'Aún no hay clientes registrados. Se guardan automáticamente al procesar una venta con nombre o cédula.'
+            : 'No se encontraron clientes con ese criterio de búsqueda.';
+        return;
+    }
+    vacio.style.display = 'none';
+
+    lista.forEach(c => {
+        const tarjeta = document.createElement('div');
+        tarjeta.className = 'tarjeta-cliente';
+        tarjeta.innerHTML = `
+            <h4>👤 ${c.nombre}</h4>
+            ${c.cedula ? `<p>C.C.: ${c.cedula}</p>` : ''}
+            ${c.celular ? `<p>📱 ${c.celular}</p>` : ''}
+            <p style="color:#64748b;font-size:0.78rem;">Última compra: ${c.ultimaCompra}</p>
+            <span class="badge-compras">${c.totalCompras} compra${c.totalCompras === 1 ? '' : 's'}</span>
+        `;
+        tarjeta.addEventListener('click', () => abrirDetalleCliente(c.id));
+        contenedor.appendChild(tarjeta);
+    });
+}
+
+function abrirModalClientes() {
+    const modal = document.getElementById('modal-clientes');
+    if (!modal) return;
+    const buscador = document.getElementById('buscador-clientes');
+    if (buscador) buscador.value = '';
+    renderizarListaClientes();
+    modal.classList.add('active');
+}
+
+function cerrarModalClientes() {
+    const modal = document.getElementById('modal-clientes');
+    if (modal) modal.classList.remove('active');
+}
+
+function abrirDetalleCliente(idCliente) {
+    const cliente = clientesGamer.find(c => c.id === idCliente);
+    if (!cliente) return;
+
+    document.getElementById('titulo-detalle-cliente').innerHTML = `<span class="icono-panel">👤</span>${cliente.nombre}`;
+    document.getElementById('info-detalle-cliente').innerHTML = `
+        ${cliente.cedula ? `<span><strong>C.C.:</strong> ${cliente.cedula}</span>` : ''}
+        ${cliente.celular ? `<span><strong>Celular:</strong> ${cliente.celular}</span>` : ''}
+        <span><strong>Compras:</strong> ${cliente.totalCompras}</span>
+        <span><strong>Total gastado:</strong> ${formatearMoneda(cliente.totalGastado)}</span>
+        <span><strong>Primera compra:</strong> ${cliente.primeraCompra}</span>
+        <span><strong>Última compra:</strong> ${cliente.ultimaCompra}</span>
+    `;
+
+    const cuerpo = document.getElementById('tabla-cuerpo-detalle-cliente');
+    cuerpo.innerHTML = '';
+    const compras = historialSalidas.filter(h => {
+        const claveH = claveCliente(h.cliente, '');
+        // Compara por nombre exacto o, si el cliente tiene cédula, por coincidencia de nombre (la cédula no queda en historialSalidas por ítem)
+        return (h.cliente || '').trim().toLowerCase() === (cliente.nombre || '').trim().toLowerCase();
+    });
+
+    if (compras.length === 0) {
+        cuerpo.innerHTML = `<tr><td colspan="5" style="text-align:center;color:#64748b;">No hay compras registradas para este cliente.</td></tr>`;
+    } else {
+        compras.forEach(t => {
+            const fila = document.createElement('tr');
+            fila.innerHTML = `
+                <td>${t.fechaHora}</td>
+                <td style="color:#ff6b00;font-weight:bold;">${t.factura || 'N/A'}</td>
+                <td style="font-weight:bold;color:#fff;">${t.nombre}</td>
+                <td style="font-weight:bold;color:#10b981;">${formatearMoneda(parseFloat(t.precioVentaFinal) || 0)}</td>
+                <td style="color:#ffa500;">${t.formaPago}</td>`;
+            cuerpo.appendChild(fila);
+        });
+    }
+
+    document.getElementById('modal-detalle-cliente').classList.add('active');
+}
+
+function cerrarModalDetalleCliente() {
+    const modal = document.getElementById('modal-detalle-cliente');
+    if (modal) modal.classList.remove('active');
+}
+
+const btnCerrarClientesX = document.getElementById('btn-cerrar-clientes-x');
+const modalClientes = document.getElementById('modal-clientes');
+const buscadorClientes = document.getElementById('buscador-clientes');
+if (btnCerrarClientesX) btnCerrarClientesX.addEventListener('click', cerrarModalClientes);
+if (modalClientes) modalClientes.addEventListener('click', (e) => { if (e.target === modalClientes) cerrarModalClientes(); });
+if (buscadorClientes) buscadorClientes.addEventListener('input', function () { renderizarListaClientes(this.value); });
+
+const btnCerrarDetalleClienteX = document.getElementById('btn-cerrar-detalle-cliente-x');
+const modalDetalleCliente = document.getElementById('modal-detalle-cliente');
+if (btnCerrarDetalleClienteX) btnCerrarDetalleClienteX.addEventListener('click', cerrarModalDetalleCliente);
+if (modalDetalleCliente) modalDetalleCliente.addEventListener('click', (e) => { if (e.target === modalDetalleCliente) cerrarModalDetalleCliente(); });
+
+actualizarSugerenciasClientes();
+
+// ==========================================================================
 // ==========================================================================
 // RECIBO / TICKET — Estilos 100% inline para garantizar impresión correcta
 // ==========================================================================
@@ -1229,8 +1757,8 @@ const NEGOCIO = {
     nombre:    "GAMERCORE",
     slogan:    "Hardware & Tecnología de Alto Rendimiento",
     nit:       "NIT: 900.123.456-7",
-    telefono:  "+57 300 000 0000",
-    direccion: "Medellín, Antioquia, Colombia",
+    telefono:  "300 226 9524",
+    direccion: "CRA 48 # 10-45, C.C. Monterrey, Local 271",
     mensaje:   "¡Gracias por tu compra! Vuelve pronto."
 };
 
@@ -1244,16 +1772,15 @@ function imprimirReciboTicket(nroFactura, fecha, pago, nombreCliente, cedulaClie
     // Filas de productos
     let filasItems = '';
     items.forEach((item, i) => {
-        const tot = (item.precioOriginal * item.cantidad) - item.descuento;
         const bg = i % 2 === 0 ? '#f9f9f9' : '#ffffff';
         filasItems += `
             <tr style="background:${bg};">
-                <td style="padding:12px 8px;border-bottom:1px solid #e0e0e0;font-size:16px;color:#000;">
-                    <strong style="color:#000;">${item.nombre}.</strong><br>
-                    <span style="font-size:14px;color:#555;">Cant.: ${item.cantidad} × ${formatearMoneda(item.precioOriginal)}</span>
+                <td style="padding:9px 10px;border-bottom:1px solid #e0e0e0;font-size:13.5px;color:#000;">
+                    <strong style="color:#000;">${item.nombre}.</strong>
+                    ${item.descripcionProducto ? `<br><span style="font-size:11px;color:#333;font-style:italic;">📝 ${item.descripcionProducto}</span>` : ''}
                 </td>
-                <td style="padding:12px 8px;border-bottom:1px solid #e0e0e0;text-align:right;font-size:16px;font-weight:bold;color:#000;vertical-align:middle;">
-                    ${formatearMoneda(tot)}
+                <td style="padding:9px 10px;border-bottom:1px solid #e0e0e0;text-align:right;font-size:13.5px;color:#000;vertical-align:middle;white-space:nowrap;">
+                    x${item.cantidad}
                 </td>
             </tr>`;
     });
@@ -1275,52 +1802,56 @@ function imprimirReciboTicket(nroFactura, fecha, pago, nombreCliente, cedulaClie
     ">
 
         <!-- ENCABEZADO NEGOCIO -->
-        <div class="recibo-fila-header" style="border: 3px solid #000; padding: 20px 22px; margin-bottom: 16px;">
-            <div style="display:flex; align-items:flex-start; gap:16px;">
-                <img src="logo-gamercore.jpg" alt="GamerCore" style="width:76px;height:76px;object-fit:contain;background:#04070d;border-radius:10px;padding:5px;flex-shrink:0;">
-                <div>
-                    <div style="font-size:13px;font-weight:bold;color:#000;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">RECIBO DE VENTA</div>
-                    <div style="font-size:26px;font-weight:900;color:#000;letter-spacing:2px;margin-bottom:6px;">${NEGOCIO.nombre}</div>
-                    <div style="font-size:15px;color:#000;font-style:italic;margin-bottom:10px;">${NEGOCIO.slogan}</div>
-                    <div style="font-size:15px;color:#000;line-height:1.8;">
-                        <div>${NEGOCIO.nit}</div>
-                        <div>📞 ${NEGOCIO.telefono}</div>
-                        <div>📍 ${NEGOCIO.direccion}</div>
+        <div style="border: 2px solid #000; padding: 14px 18px; margin-bottom: 10px;">
+            <div class="recibo-fila-header" style="align-items:center;">
+                <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+                    <img src="logo-gamercore.jpg" alt="GamerCore" style="width:52px;height:52px;object-fit:contain;background:#04070d;border-radius:8px;padding:4px;flex-shrink:0;">
+                    <div style="min-width:0;">
+                        <div style="font-size:10px;font-weight:bold;color:#666;text-transform:uppercase;letter-spacing:1px;">Recibo de Venta</div>
+                        <div style="font-size:20px;font-weight:900;color:#000;letter-spacing:1.5px;line-height:1.2;">${NEGOCIO.nombre}</div>
+                        <div style="font-size:11.5px;color:#333;font-style:italic;">${NEGOCIO.slogan}</div>
                     </div>
                 </div>
+                <div class="recibo-header-derecha">
+                    <div style="font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1px;">N.° Factura</div>
+                    <div style="font-size:17px;font-weight:900;color:#000;">${nroFactura}</div>
+                </div>
             </div>
-            <div class="recibo-header-derecha">
-                <div style="font-size:13px;color:#000;text-transform:uppercase;letter-spacing:1px;">Fecha:</div>
-                <div style="font-size:15px;color:#000;margin-bottom:14px;">${fecha}</div>
-                <div style="font-size:13px;color:#000;text-transform:uppercase;letter-spacing:1px;">N.° de Factura:</div>
-                <div style="font-size:22px;font-weight:900;color:#000;">${nroFactura}</div>
+            <div class="recibo-fila-header" style="border-top:1px dashed #ccc; margin-top:10px; padding-top:8px;">
+                <div style="font-size:11px;color:#333;line-height:1.5;">
+                    📞 ${NEGOCIO.telefono}<br>📍 ${NEGOCIO.direccion}
+                </div>
+                <div class="recibo-header-derecha">
+                    <div style="font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1px;">Fecha</div>
+                    <div style="font-size:12px;color:#000;">${fecha}</div>
+                </div>
             </div>
         </div>
 
         <!-- DATOS DEL CLIENTE -->
-        <div class="recibo-fila-header" style="border: 3px solid #000; padding: 16px 22px; margin-bottom: 16px;">
+        <div class="recibo-fila-header" style="border: 2px solid #000; padding: 12px 18px; margin-bottom: 10px;">
             <div>
-                <div style="font-size:13px;font-weight:bold;color:#000;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Cliente:</div>
-                <div style="font-size:16px;color:#000;line-height:1.8;">${datosCliente}</div>
+                <div style="font-size:10px;font-weight:bold;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Cliente</div>
+                <div style="font-size:14px;color:#000;line-height:1.6;">${datosCliente}</div>
             </div>
             <div class="recibo-header-derecha">
-                <div style="font-size:13px;font-weight:bold;color:#000;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Forma de Pago:</div>
-                <div style="font-size:16px;color:#000;">${pago}.</div>
+                <div style="font-size:10px;font-weight:bold;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Forma de Pago</div>
+                <div style="font-size:14px;color:#000;">${pago}.</div>
             </div>
         </div>
 
         ${!seVendio ? `
         <!-- AVISO: VENTA NO CONCRETADA -->
-        <div style="border: 3px solid #c00; padding: 12px 22px; margin-bottom: 16px; text-align:center;">
-            <span style="font-size:15px;font-weight:900;color:#c00;text-transform:uppercase;letter-spacing:1px;">⚠️ Venta no concretada — No se descontó del inventario.</span>
+        <div style="border: 2px solid #c00; padding: 10px 18px; margin-bottom: 10px; text-align:center;">
+            <span style="font-size:13px;font-weight:900;color:#c00;text-transform:uppercase;letter-spacing:0.5px;">⚠️ Venta no concretada — No se descontó del inventario.</span>
         </div>` : ''}
 
         <!-- TABLA DE PRODUCTOS -->
-        <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
+        <table style="width:100%;border-collapse:collapse;margin-bottom:10px;border:2px solid #000;">
             <thead>
                 <tr style="background:#000;">
-                    <th style="padding:12px 8px;text-align:left;font-size:15px;color:#fff;font-weight:bold;">DESCRIPCIÓN</th>
-                    <th style="padding:12px 8px;text-align:right;font-size:15px;color:#fff;font-weight:bold;">TOTAL</th>
+                    <th style="padding:9px 10px;text-align:left;font-size:13px;color:#fff;font-weight:bold;">Descripción</th>
+                    <th style="padding:9px 10px;text-align:right;font-size:13px;color:#fff;font-weight:bold;">Cant.</th>
                 </tr>
             </thead>
             <tbody>${filasItems}</tbody>
@@ -1328,35 +1859,42 @@ function imprimirReciboTicket(nroFactura, fecha, pago, nombreCliente, cedulaClie
 
         ${descripcionVenta ? `
         <!-- DESCRIPCIÓN DE LA VENTA -->
-        <div style="border: 3px solid #000; padding: 14px 22px; margin-bottom: 16px;">
-            <div style="font-size:13px;font-weight:bold;color:#000;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Descripción / Observaciones:</div>
-            <div style="font-size:15px;color:#000;line-height:1.6;white-space:pre-wrap;">${descripcionVenta}</div>
+        <div style="border: 2px solid #000; padding: 10px 18px; margin-bottom: 10px;">
+            <div style="font-size:10px;font-weight:bold;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Descripción / Observaciones</div>
+            <div style="font-size:13px;color:#000;line-height:1.5;white-space:pre-wrap;">${descripcionVenta}</div>
         </div>` : ''}
 
         <!-- TOTALES -->
-        <div style="border-top:3px solid #000;padding-top:14px;margin-bottom:22px;">
-            <div style="display:flex;justify-content:space-between;font-size:16px;color:#000;margin-bottom:6px;">
-                <span>Subtotal:</span><span>${formatearMoneda(subtotal)}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;font-size:22px;font-weight:900;color:#000;border-top:1px dashed #000;padding-top:10px;">
+        <div style="border-top:2px solid #000;padding-top:8px;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;font-size:19px;font-weight:900;color:#000;padding-top:4px;">
                 <span>Total Cobrado:</span><span>${formatearMoneda(total)}</span>
             </div>
         </div>
 
         <!-- FIRMA -->
-        <div style="display:flex;justify-content:space-between;margin-top:40px;margin-bottom:20px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:14px;">
             <div style="text-align:center;width:45%;">
-                <div style="border-top:1px solid #000;padding-top:8px;font-size:14px;color:#000;">Firma del Vendedor.</div>
+                <div style="border-top:1px solid #000;padding-top:6px;font-size:12px;color:#000;">Firma del Vendedor.</div>
             </div>
             <div style="text-align:center;width:45%;">
-                <div style="border-top:1px solid #000;padding-top:8px;font-size:14px;color:#000;">Firma del Cliente.</div>
+                <div style="border-top:1px solid #000;padding-top:6px;font-size:12px;color:#000;">Firma del Cliente.</div>
             </div>
         </div>
 
+        <!-- AVISO IMPORTANTE Y GARANTÍA -->
+        <div style="border-top:1px dashed #000;padding-top:10px;text-align:center;">
+            <p style="font-size:9.5px;color:#444;line-height:1.4;margin-bottom:6px;">
+                <strong>Aviso importante:</strong> Todos nuestros productos están sujetos a cambio de precio y disponibilidad sin previo aviso, validar al momento de realizar la compra.
+            </p>
+            <p style="font-size:10.5px;font-weight:900;color:#000;letter-spacing:0.4px;">
+                Garantía por defecto de fábrica.
+            </p>
+        </div>
+
         <!-- FOOTER -->
-        <div style="text-align:center;border-top:1px dashed #000;padding-top:14px;font-size:14px;color:#000;">
+        <div style="text-align:center;border-top:1px dashed #000;padding-top:10px;margin-top:8px;font-size:12px;color:#000;">
             ${NEGOCIO.mensaje}<br>
-            <span style="font-size:12px;color:#555;">${NEGOCIO.nombre} — Sistema de Inventario GamerCore</span>
+            <span style="font-size:10.5px;color:#777;">${NEGOCIO.nombre} — Sistema de Inventario GamerCore</span>
         </div>
 
     </div>`;
@@ -1413,6 +1951,21 @@ if (modalHistorial) {
     });
 }
 
+// --- Modal de Copia de Seguridad ---
+const modalBackup = document.getElementById('modal-backup');
+const btnCerrarBackupX = document.getElementById('btn-cerrar-backup-x');
+
+function cerrarModalBackup() {
+    if (modalBackup) modalBackup.classList.remove('active');
+}
+
+if (btnCerrarBackupX) btnCerrarBackupX.addEventListener('click', cerrarModalBackup);
+if (modalBackup) {
+    modalBackup.addEventListener('click', (e) => {
+        if (e.target === modalBackup) cerrarModalBackup();
+    });
+}
+
 // ==========================================================================
 // BÚSQUEDA Y ARRANQUE
 // ==========================================================================
@@ -1422,9 +1975,11 @@ buscadorInput.addEventListener('input', function() {
     temporizadorBusqueda = setTimeout(() => actualizarInterfaz('todos'), 300);
 });
 
-abrirDBImagenes().then(() => {
+abrirDBImagenes().then(async () => {
+    await cargarDatosDesdeSupabase();
     actualizarSelectCategorias(); actualizarFiltros(); actualizarInterfaz(); renderizarTablaHistorial();
     pintarMetodosPagoPersonalizados();
+    actualizarSugerenciasClientes();
 });
 
 const pieAnio = document.getElementById('pie-pagina-anio');
@@ -1444,12 +1999,10 @@ if (pieAnio) pieAnio.textContent = new Date().getFullYear();
     const destinoPorSeccion = {
         inicio: 'seccion-inicio',
         inventario: 'seccion-inventario',
-        ventas: 'seccion-inventario',
-        historial: 'seccion-historial'
+        ventas: 'seccion-inventario'
     };
 
     const destinoPorAccion = {
-        backup: 'seccion-backup',
         admin: 'panel-rol'
     };
 
@@ -1471,15 +2024,25 @@ if (pieAnio) pieAnio.textContent = new Date().getFullYear();
             if (seccion) {
                 itemsMenu.forEach(i => i.classList.remove('activo'));
                 this.classList.add('activo');
-                irASeccion(destinoPorSeccion[seccion]);
 
-                if (seccion === 'ventas') {
-                    const btnCarrito = document.getElementById('btn-toggle-carrito');
-                    const panelCarrito = document.getElementById('panel-carrito');
-                    if (btnCarrito && panelCarrito && panelCarrito.style.display === 'none') {
-                        btnCarrito.click();
+                if (seccion === 'historial') {
+                    if (typeof abrirModalHistorial === 'function') abrirModalHistorial();
+                } else if (seccion === 'clientes') {
+                    if (typeof abrirModalClientes === 'function') abrirModalClientes();
+                } else {
+                    irASeccion(destinoPorSeccion[seccion]);
+
+                    if (seccion === 'ventas') {
+                        const btnCarrito = document.getElementById('btn-toggle-carrito');
+                        const panelCarrito = document.getElementById('panel-carrito');
+                        if (btnCarrito && panelCarrito && panelCarrito.style.display === 'none') {
+                            btnCarrito.click();
+                        }
                     }
                 }
+            } else if (accion === 'backup') {
+                const modalBackup = document.getElementById('modal-backup');
+                if (modalBackup) modalBackup.classList.add('active');
             } else if (accion && destinoPorAccion[accion]) {
                 irASeccion(destinoPorAccion[accion]);
             }
@@ -1497,5 +2060,15 @@ if (pieAnio) pieAnio.textContent = new Date().getFullYear();
 
     if (menuOverlay) {
         menuOverlay.addEventListener('click', cerrarMenuMobile);
+    }
+
+    const btnColapsarMenu = document.getElementById('btn-colapsar-menu');
+    if (btnColapsarMenu) {
+        btnColapsarMenu.addEventListener('click', function () {
+            const colapsado = document.body.classList.toggle('menu-colapsado');
+            btnColapsarMenu.textContent = colapsado ? '›' : '‹';
+            btnColapsarMenu.title = colapsado ? 'Mostrar menú' : 'Ocultar menú';
+            btnColapsarMenu.setAttribute('aria-label', colapsado ? 'Mostrar menú' : 'Ocultar menú');
+        });
     }
 })();
